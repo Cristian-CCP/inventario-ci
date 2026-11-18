@@ -1,0 +1,83 @@
+# Mismo pipeline que el Jenkinsfile, pero en GitHub Actions
+#   job pruebas  ->  etapa "Pruebas unitarias"  (contenedor efímero python:3.12-slim)
+#   job imagen   ->  etapas "Construir imagen" y "Prueba de humo"
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Todos los pasos del job corren dentro de un contenedor efímero
+    container:
+      image: python:3.12-slim
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_NO_CACHE_DIR: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Instalar dependencias de prueba
+        run: pip install --quiet -r requirements-dev.txt
+
+      - name: Ejecutar pruebas unitarias
+        run: |
+          mkdir -p reportes
+          pytest --junitxml=reportes/pruebas.xml
+
+      - name: Resumen de pruebas
+        if: always() && hashFiles('reportes/pruebas.xml') != ''
+        run: |
+          python - <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          import xml.etree.ElementTree as ET
+          raiz = ET.parse("reportes/pruebas.xml").getroot()
+          suite = raiz if raiz.tag == "testsuite" else raiz.find("testsuite")
+          total = int(suite.get("tests", 0))
+          fallidas = int(suite.get("failures", 0)) + int(suite.get("errors", 0))
+          omitidas = int(suite.get("skipped", 0))
+          print("### Resultado de pruebas unitarias")
+          print(f"- Total: {total}")
+          print(f"- Aprobadas: {total - fallidas - omitidas}")
+          print(f"- Fallidas: {fallidas}")
+          for caso in suite.iter("testcase"):
+              if caso.find("failure") is not None or caso.find("error") is not None:
+                  print(f"  - `{caso.get('classname')}.{caso.get('name')}`")
+          EOF
+
+      - name: Publicar reporte JUnit
+        if: always()   # se conserva aunque pytest falle
+        uses: actions/upload-artifact@v7
+        with:
+          name: reporte-pruebas
+          path: reportes/pruebas.xml
+          if-no-files-found: warn
+
+  imagen:
+    needs: pruebas   # solo se ejecuta si las pruebas pasan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      IMAGEN: inventario:${{ github.run_number }}
+      CONTENEDOR: humo-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Construir imagen
+        run: docker build -t "$IMAGEN" .
+
+      - name: Prueba de humo
+        # Reintenta GET /salud hasta obtener HTTP 200 y {"estado": "ok"} (máx. 30 s)
+        run: HUMO_TIMEOUT=30 sh scripts/prueba_humo.sh "$IMAGEN" "$CONTENEDOR"
+
+      - name: Limpiar contenedor de prueba
+        if: always()
+        run: docker rm -f "$CONTENEDOR" >/dev/null 2>&1 || true
