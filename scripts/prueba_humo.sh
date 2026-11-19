@@ -1,15 +1,3 @@
-#!/bin/sh
-# Prueba de humo compartida por Jenkins y GitHub Actions.
-#
-# Uso: sh scripts/prueba_humo.sh <imagen> <nombre-contenedor>
-#
-# 1. Arranca la imagen recién construida en segundo plano.
-# 2. Consulta GET /salud dentro del contenedor, con reintentos, hasta que
-#    responda HTTP 200 con un JSON que contenga "estado": "ok".
-# 3. Falla si no lo logra dentro del límite de tiempo (HUMO_TIMEOUT, en s).
-#
-# La eliminación del contenedor NO se hace aquí: la garantiza cada pipeline
-# en su bloque post/always (Jenkins) o en un paso con if: always() (Actions).
 set -eu
 
 IMAGEN="${1:?Indica la imagen a probar}"

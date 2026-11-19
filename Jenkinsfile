@@ -1,8 +1,3 @@
-// =============================================================
-// Pipeline declarativo — Curso Integración Continua · U2 / E4
-// Etapas: pruebas dentro de un contenedor -> imagen Docker -> prueba de humo
-// Si una etapa falla, las siguientes no se ejecutan.
-// =============================================================
 pipeline {
   agent none
   options {
